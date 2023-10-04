@@ -1,0 +1,133 @@
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class Server implements Runnable{
+
+    private ArrayList<ConnectionHandler> connections; //List of users
+    private ServerSocket server; 
+    private boolean done;
+    private ExecutorService pool; //Creating thread pool since user connections are shortlived 
+
+    public Server() { // Initialize array list
+        connections = new ArrayList<>();
+        done = false; //If user is not done
+    } 
+
+    @Override
+    public void run() {
+        try {
+            server = new ServerSocket(9999); //Creating a new server; only needs a port
+            pool = Executors.newCachedThreadPool();
+            while (!done) {
+                Socket user = server.accept(); // When we accept the connection we get a socket 
+                ConnectionHandler handler = new ConnectionHandler(user); //Adds users
+                connections.add(handler);
+                pool.execute(handler); //runs the run funtion
+            }
+        } catch (Exception e) { // Always need to do in Java when using something like writers or reading or sockets
+            shutdown();
+        }
+    }
+
+    public void broadcast(String message) { //broadcast message to all users
+        for (ConnectionHandler ch : connections) {
+            if (ch != null) {
+                ch.sendMessage(message);
+            } 
+        }
+    }
+
+    public void shutdown() {
+        try { //Could throw and expection 
+            done = true; //If user is done it shuts down
+            pool.shutdown();
+            if (!server.isClosed()) {
+                server.close();
+            }
+            for (ConnectionHandler ch : connections) {
+                ch.shutdown();
+            }
+        }
+        catch (IOException e) {
+          //ignore  
+        }
+    }
+    class ConnectionHandler implements Runnable {
+        // ConnectionHandler is what handles user connections
+
+        private Socket user;
+        private BufferedReader in; //Get the stream from the socket; When user sends something we get it from in 
+        private PrintWriter out; //Write something to the user
+        private String username; //username
+
+        public ConnectionHandler(Socket user) { //Since we are going to be handling users we do it outside
+            this.user = user;
+        }
+
+       @Override
+       public void run() {
+        try { //Deal with the user
+            out = new PrintWriter(user.getOutputStream(), true); //Initialize out and in stated before
+            in = new BufferedReader(new InputStreamReader(user.getInputStream()));
+            out.println("Please enter a username: "); //Ask for username
+            username = in.readLine();
+            System.out.println(username + " connected!");
+            broadcast(username + "Joined the chat!"); //Informs all users
+            String message;
+            while ((message = in.readLine()) != null) { //Procress message if it not null
+                if (message.startsWith("/usern")) {
+                    //handles username
+                    String[] messageSplit = message.split(" ", 2);
+                    if (messageSplit.length == 2) {
+                        broadcast(username + " renamed themselves tp " + messageSplit[1]);
+                        System.out.println(username + " renamed themselves tp " + messageSplit[1]);
+                        username = messageSplit[1]; 
+                        out.println("Successfully changed username to " + username);
+                    }
+                    else {
+                        out.println("No username was provided.");
+                    }
+                } 
+                else if (message.startsWith("/quit")) {
+                    broadcast(username + " left the chat.");
+                    shutdown(); 
+                }
+                else {
+                    broadcast(username + ": " + message);
+                }
+            }
+        } catch (IOException e) {
+            shutdown(); 
+        }
+        
+       } 
+
+       public void sendMessage(String message) { //Send message to all users
+        out.println(message);
+       }
+       public void shutdown() { 
+        try {
+            in.close(); //Close the screens
+            out.close(); 
+            if (!user.isClosed()) {
+                user.close();
+            }
+        }
+        catch (IOException e) {
+            //ignore
+        }
+       }
+    }
+
+    public static void main(String[] args) {
+        Server server = new Server(); //The server is going to be a new server
+        server.run(); //We are going to run this server; run a connection handler for each connection
+    }
+}
